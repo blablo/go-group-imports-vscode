@@ -1,37 +1,47 @@
-import {
-  Range,
-  window,
-} from 'vscode';
-import { multilineImportsGroupRegex, resolveRootPackage, getImportsRange, getImports } from './utils';
+import { Range, window, workspace, WorkspaceEdit, Position } from 'vscode';
+import { resolveRootPackage, getImportsRange, getImports } from './utils';
 
-export const goGroupImports = () => {
-  const { activeTextEditor: editor, activeTextEditor: { document } } = window;
+export const goGroupImports = async () => {
+  const {
+    activeTextEditor: editor,
+    activeTextEditor: { document },
+  } = window;
   const documentText = document.getText();
 
   if (document.languageId !== 'go') return;
 
-  const rootPkg = resolveRootPackage();
-  if (rootPkg === '') return;
+  const rootPkg = await resolveRootPackage();
+  if (rootPkg === '') {
+    window.showErrorMessage(
+      'Failed to resolve root project directory. No GOPATH variable or go.mod file found.'
+    );
+    return;
+  }
+  // TODO show error
 
   const imports = getImports(documentText);
+
   if (!imports.length) return;
 
   const groupedList = group(imports, rootPkg);
 
   const importsRange = getImportsRange(documentText);
-  editor.edit(edit => {
-    edit.replace(
-        new Range(importsRange.start, 0, importsRange.end - 1, Number.MAX_VALUE),
-        importGroupsToString(groupedList))
-  });
 
-  document.save();
+  const edit = new WorkspaceEdit();
+  const range = new Range(
+    importsRange.start,
+    0,
+    importsRange.end - 1,
+    Number.MAX_VALUE
+  );
+  edit.replace(document.uri, range, importGroupsToString(groupedList));
+  workspace.applyEdit(edit).then(document.save);
 };
 
 type ImportGroups = {
-  stdlib: string[],
-  thirdParty: string[],
-  own: string[],
+  stdlib: string[];
+  thirdParty: string[];
+  own: string[];
 };
 
 const isStdlibImport = (imp: string): boolean => {
@@ -64,7 +74,6 @@ export const group = (imports: string[], rootPkg: string): ImportGroups => {
 
 const importGroupsToString = (importGroups: ImportGroups): string =>
   Object.keys(importGroups)
-    .filter(key => importGroups[key].length)
-    .map(key => importGroups[key].join('\n'))
+    .filter((key) => importGroups[key].length)
+    .map((key) => importGroups[key].join('\n'))
     .join('\n\n');
-
